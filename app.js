@@ -16,7 +16,7 @@ app.use('/user', userController)
 app.use(requestResponseHandler.handleResponse)
 app.use(requestResponseHandler.handleError)
 mongoose.connect(dbUrl)
-.then(()=>app.listen(process.env.PORT,()=>{
+.then(()=>app.listen(process.env.PORT || 5000,()=>{
     console.log('App is running on port 3000')
 }))
 .catch(err=> {
