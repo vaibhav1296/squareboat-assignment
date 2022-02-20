@@ -58,10 +58,10 @@ class Query {
             })
         })
     }
-    deleteToken(email){
+    deleteToken(id){
         return new Promise((resolve, reject)=>{
             User.updateOne({
-                email
+                _id:id
             },{
                 token:null
             })
@@ -152,6 +152,21 @@ class Query {
             .then(data=> resolve(data))
             .catch(err=> reject(err))
         })
+    }
+
+    getFeed(userIds){
+            return new Promise((resolve, reject)=>{
+                Post.find({
+                    user_id:{
+                        "$in":userIds
+                    }
+                })
+                .lean()
+                .then(data=>{
+                    resolve(data)
+                })
+                .catch(err=> reject(err))
+            })
     }
 
 }
