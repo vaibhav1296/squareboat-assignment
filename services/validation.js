@@ -67,9 +67,7 @@ const isLoggedIn = async (req, res, next)=>{
             throw squareboatError('Please login', errorCodes.LOG_IN)
         }
         const token = header.split(" ")[1]
-        console.log(process.env.JWT_SECRET)
         const decoded = jwt.verify(token, process.env.JWT_SECRET)
-        console.log(decoded)
         const userId = decoded.userId
         const user = await query.getUserById(userId)
         if(utility.isNullOrUndefined(user)){
@@ -81,7 +79,6 @@ const isLoggedIn = async (req, res, next)=>{
         next()
 
     }catch(err){
-        console.log(err)
         next(err)
     }
 }
