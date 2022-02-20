@@ -38,7 +38,7 @@ router.post('/register', validation.validateRegisterApi, async (req, res, next)=
         res.locals.response = {
             body:{
                 data:{
-                    id:newUser._id,
+                    userId:newUser._id,
                     name:newUser.name,
                     email:newUser.email,
                     token
@@ -80,7 +80,8 @@ router.post('/login', validation.validateLoginRequest, async (req, res, next)=>{
             body:{
                 data:{
                     email,
-                    token
+                    token,
+                    userId:userFromDb._id
                 }
             },
             message:'The user has been logged in successfully'
@@ -105,11 +106,22 @@ router.get('/all', validation.isLoggedIn, async (req, res, next)=>{
                 message:'No users on this application'
             }
         }else{
+            //current user followers
+            const {userId} = jwt.verify(req.headers['authorization'].split(" ")[1], process.env.JWT_SECRET)
+            const user = await query.getUserById(userId)
+            let followers = user.followers
             let usersList = users.map(data=>{
                 return {
                     id:data._id.toString(),
                     name:data.name,
+                    email:data.email,
+                    age:data.age,
+                    gender:data.gender,
+                    isFollowed : followers.includes(data._id.toString())
                 }
+            })
+            usersList = usersList.filter(data=>{
+                return data.id !== userId
             })
             res.locals.response = {
                 body:{
@@ -120,7 +132,55 @@ router.get('/all', validation.isLoggedIn, async (req, res, next)=>{
             next()
         }
     }catch(err){
-        console.log(err)
+        // console.log(err)
+        next(err)
+    }
+})
+
+router.get('/feed', validation.isLoggedIn, async (req, res, next)=>{
+    try{
+        const {userId} = jwt.verify(req.headers['authorization'].split(" ")[1], process.env.JWT_SECRET)
+        let user = await query.getUserById(userId)
+        if(utility.isNullOrUndefined(user)){
+            throw squareboatError('No user', errorCodes.DB_QUERY)
+        }
+        const followers = user.followers
+        const posts = await query.getFeed(followers)
+        if(posts.length > 0){
+            let postsArr = []
+            for(let i=0; i<posts.length; i++){
+                const user = await query.getUserById(posts[i].user_id)
+                postsArr.push({
+                    postId:posts[i]._id,
+                    createdAt:posts[i].createdAt,
+                    likes:posts[i].likes.length,
+                    title:posts[i].title,
+                    description:posts[i].description,
+                    user:{
+                        userId:posts[i].user_id,
+                        name:user.name
+                    }
+                })
+            }
+            res.locals.response = {
+                body:{
+                    data:postsArr
+                },
+                message:'List of feed'
+            }
+            next()
+            
+        }else{
+            //return err no posts please follow some users
+            res.locals.response = {
+                body:{
+                    data:[]
+                },
+                message:'Please follow users to see the feed'
+            }
+            next()
+        }
+    }catch(err){
         next(err)
     }
 })
@@ -148,7 +208,8 @@ router.get('/profile', validation.isLoggedIn, async (req, res, next)=>{
             name:user.name,
             email:user.email,
             gender:user.gender,
-            age:user.age
+            age:user.age,
+            isFollow:true
 
         }
         let allPosts = await query.getAllPosts(userId)
@@ -180,12 +241,15 @@ router.get('/profile/:id', validation.isLoggedIn, async (req, res, next)=>{
             throw squareboatError("please provide an ID", errorCodes.EMPTY_FIELD)
         }
         let user = await query.getUserById(id)
+        const isFollow = user.followers.includes(currentUserId)
         user = {
+            id:user._id.toString(),
             name:user.name,
             email:user.email,
             id:user._id.toString(),
             gender:user.gender,
-            age:user.age
+            age:user.age,
+            isFollow
         }
         // first check if you follow this
         const currentUser = await query.getUserById(currentUserId)
@@ -213,7 +277,7 @@ router.get('/profile/:id', validation.isLoggedIn, async (req, res, next)=>{
         
         
     }catch(err){
-        console.log(err)
+        // console.log(err)
         next(err)
     }
 })
@@ -242,7 +306,7 @@ router.put('/follow/:id', validation.isLoggedIn, async (req, res, next)=>{
         }
         next()
     }catch(err){
-        console.log(err)
+        // console.log(err)
         next(err)
     }
 })
@@ -279,19 +343,34 @@ router.post('/like/:id', validation.isLoggedIn, async (req, res, next)=>{
             throw squareboatError('PLease provide an ID', errorCodes.EMPTY_FIELD)
         }
         const {userId} = jwt.verify(req.headers['authorization'].split(" ")[1],process.env.JWT_SECRET)
-        const updatedPost = await query.addLikeOnPost(id, userId)
-        if(utility.isNullOrUndefined(updatedPost)){
-            throw squareboatError('Something went wrong', errorCodes.DB_QUERY)
+        const post = await query.getPostById(id)
+        if(utility.isNullOrUndefined(post)){
+            throw squareboatError('No post', errorCodes.DB_QUERY)
         }
-        res.locals.response = {
-            body:{
-                data:true
-            },
-            message:"like added"
+        if(post.likes.includes(userId)){
+            res.locals.response = {
+                body:{
+                    data:true
+                },
+                message:"Already added"
+            }
+            next()
+        }else{
+            const updatedPost = await query.addLikeOnPost(id, userId)
+            if(utility.isNullOrUndefined(updatedPost)){
+                throw squareboatError('Something went wrong', errorCodes.DB_QUERY)
+            }
+            res.locals.response = {
+                body:{
+                    data:true
+                },
+                message:"like added"
+            }
+            next()
         }
-        next()
+        
     }catch(err){
-        console.log(err)
+        // console.log(err)
         next(err)
     }
 })
@@ -303,21 +382,15 @@ router.delete('/logout', async (req, res, next)=>{
         if(utility.isNullOrUndefined(header)){
             throw squareboatError('Missing authorization header', errorCodes.EMPTY_FIELD)
         }
-        const {email} = req.body
-        if(utility.isNullOrUndefined(email)){
-            throw squareboatError('Provide a email', errorCodes.EMPTY_FIELD)
-        }
-        if(!utility.isEmailValid(email)){
-            throw squareboatError('Invalid email', errorCodes.INVALID_PARAM)
-        }
+        const {userId} = jwt.verify(req.headers['authorization'].split(" ")[1],process.env.JWT_SECRET)
         const headerToken = header.split(" ")[1]
-        const userFromDb = await query.getUserByEmail(email)
+        const userFromDb = await query.getUserById(userId)
         if(utility.isNullOrUndefined(userFromDb)){
             throw squareboatError('Email does not exist', errorCodes.INVALID_PARAM)
         }
         if(headerToken === userFromDb.token){
             //update the user and put token value null
-            const updatedUser = await query.deleteToken(email)
+            const updatedUser = await query.deleteToken(userId)
             if(utility.isNullOrUndefined(updatedUser) || !updatedUser.acknowledged){
                 throw squareboatError('Unable to logout', errorCodes.DB_QUERY)
             }
